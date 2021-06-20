@@ -1,6 +1,7 @@
 match (n) detach delete n;
 
 drop index text_value if exists;
+drop index structure if exists;
 
 call apoc.schema.assert({
 }, {
@@ -16,6 +17,7 @@ call apoc.schema.assert({
 });
 
 create fulltext index text_value for (v:pim_catalog_text|pim_catalog_textarea|pim_catalog_identifier|pim_catalog_simpleselect|pim_catalog_image|pim_catalog_file|pim_catalog_date) on each [v.value];
+create fulltext index structure for ()-[r:TRANSLATED_IN]->() on each [r.translation];
 
 call apoc.load.jdbc('jdbc:mysql://mysql:3306/akeneo_pim?user=root&password=root', 'pim_catalog_locale') yield row
 merge (l:Locale {id: row.id}) set l.code = row.code;
@@ -61,7 +63,7 @@ merge (a)-[:TRANSLATED_IN {translation: row.label}]->(l);
 call apoc.load.jdbc('jdbc:mysql://mysql:3306/akeneo_pim?user=root&password=root', 'pim_catalog_family') yield row
 match (a:Attribute {id: row.label_attribute_id})
 merge (f:Family {id: row.id}) set f.code = row.code
-merge (f)-[:AS_LABEL]->(a);
+merge (a)-[:AS_LABEL]->(f);
 
 call apoc.load.jdbc('jdbc:mysql://mysql:3306/akeneo_pim?user=root&password=root', 'pim_catalog_family_translation') yield row
 match (l:Locale {code: row.locale})
@@ -107,38 +109,39 @@ with pm, a, raw_values[a.code] as by_channel
         unwind keys(by_locale) as locale
         merge (v:Value {
             value: case a.type
-                    when 'pim_catalog_text' then by_locale[locale]
-                    when 'pim_catalog_textarea' then by_locale[locale]
-                    when 'pim_catalog_identifier' then by_locale[locale]
-                    when 'pim_catalog_number' then by_locale[locale]
-                    when 'pim_catalog_date' then by_locale[locale]
-                    when 'pim_catalog_boolean' then by_locale[locale]
-                    when 'pim_catalog_simpleselect' then by_locale[locale]
-                    when 'pim_catalog_image' then by_locale[locale]
-                    when 'pim_catalog_file' then by_locale[locale]
-                    //when 'pim_catalog_price_collection' then by_locale[locale]
-                    //when 'pim_catalog_metric' then by_locale[locale]
-                    //when 'pim_catalog_multiselect' then by_locale[locale]
-                    else apoc.convert.toJson(by_locale[locale])
-                end
-            })
+                when 'pim_catalog_text' then by_locale[locale]
+                when 'pim_catalog_textarea' then by_locale[locale]
+                when 'pim_catalog_identifier' then by_locale[locale]
+                when 'pim_catalog_number' then by_locale[locale]
+                when 'pim_catalog_date' then by_locale[locale]
+                when 'pim_catalog_boolean' then by_locale[locale]
+                when 'pim_catalog_simpleselect' then by_locale[locale]
+                when 'pim_catalog_image' then by_locale[locale]
+                when 'pim_catalog_file' then by_locale[locale]
+                //when 'pim_catalog_price_collection' then by_locale[locale]
+                //when 'pim_catalog_metric' then by_locale[locale]
+                //when 'pim_catalog_multiselect' then by_locale[locale]
+                else apoc.convert.toJson(by_locale[locale])
+            end
+        })
         merge (pm)-[:HAS_VALUE {channel: channel, locale: locale}]->(v)
         with pm, v, a, channel, locale
         call apoc.create.addLabels(v, [a.type]) yield node
         merge (v)-[:FOR_ATTRIBUTE]->(a)
         with v, channel, locale
         match (c:Channel {code: channel})
-        merge (v)-[:FOR_CHANNEL]->(c)
+        merge (v)-[:LOCALIZED]->(c)
         with v, locale
         match (l:Locale {code: locale})
-        merge (v)-[:FOR_LOCALE]->(l);
+        merge (v)-[:CHANNELED]->(l);
 
 call apoc.load.jdbc('jdbc:mysql://mysql:3306/akeneo_pim?user=root&password=root', 'pim_catalog_product') yield row
-match (f:Family {id: row.family_id})
 merge (p:Product {id: row.id}) set p.is_enabled = row.is_enabled, p.identifier = row.identifier
+with p, row
+optional match (f:Family {id: row.family_id})
 merge (p)-[:IS_FAMILY]->(f)
 with p, row
-match (pm:ProductModel {id: row.product_model_id})
+optional match (pm:ProductModel {id: row.product_model_id})
 merge (p)-[:VARIATION_OF]->(pm)
 
 with p, apoc.convert.fromJsonMap(row.raw_values) as raw_values
@@ -150,28 +153,38 @@ with p, a, raw_values[a.code] as by_channel
         unwind keys(by_locale) as locale
         merge (v:Value {
             value: case a.type
-                    when 'pim_catalog_text' then by_locale[locale]
-                    when 'pim_catalog_textarea' then by_locale[locale]
-                    when 'pim_catalog_identifier' then by_locale[locale]
-                    when 'pim_catalog_number' then by_locale[locale]
-                    when 'pim_catalog_date' then by_locale[locale]
-                    when 'pim_catalog_boolean' then by_locale[locale]
-                    when 'pim_catalog_simpleselect' then by_locale[locale]
-                    when 'pim_catalog_image' then by_locale[locale]
-                    when 'pim_catalog_file' then by_locale[locale]
-                    //when 'pim_catalog_price_collection' then by_locale[locale]
-                    //when 'pim_catalog_metric' then by_locale[locale]
-                    //when 'pim_catalog_multiselect' then by_locale[locale]
-                    else apoc.convert.toJson(by_locale[locale])
-                end
-            })
+                when 'pim_catalog_text' then by_locale[locale]
+                when 'pim_catalog_textarea' then by_locale[locale]
+                when 'pim_catalog_identifier' then by_locale[locale]
+                when 'pim_catalog_number' then by_locale[locale]
+                when 'pim_catalog_date' then by_locale[locale]
+                when 'pim_catalog_boolean' then by_locale[locale]
+                when 'pim_catalog_simpleselect' then by_locale[locale]
+                when 'pim_catalog_image' then by_locale[locale]
+                when 'pim_catalog_file' then by_locale[locale]
+                //when 'pim_catalog_price_collection' then by_locale[locale]
+                //when 'pim_catalog_metric' then by_locale[locale]
+                //when 'pim_catalog_multiselect' then by_locale[locale]
+                else apoc.convert.toJson(by_locale[locale])
+            end
+        })
         merge (p)-[:HAS_VALUE {channel: channel, locale: locale}]->(v)
-        with p, v, a, channel, locale
+        with v, a, channel, locale
         call apoc.create.addLabels(v, [a.type]) yield node
         merge (v)-[:FOR_ATTRIBUTE]->(a)
         with v, channel, locale
-        match (c:Channel {code: channel})
-        merge (v)-[:FOR_CHANNEL]->(c)
+        optional match (c:Channel {code: channel})
+        merge (v)-[:CHANNELED]->(c)
         with v, locale
-        match (l:Locale {code: locale})
-        merge (v)-[:FOR_LOCALE]->(l);
+        optional match (l:Locale {code: locale})
+        merge (v)-[:LOCALIZED]->(l);
+
+call apoc.load.jdbc('jdbc:mysql://mysql:3306/akeneo_pim?user=root&password=root', 'pim_catalog_category_product') yield row
+match (c:Category {id: row.category_id})
+match (p:Product {id: row.product_id})
+merge (c)-[:CATEGORIZE]->(p);
+
+call apoc.load.jdbc('jdbc:mysql://mysql:3306/akeneo_pim?user=root&password=root', 'pim_catalog_category_product_model') yield row
+match (c:Category {id: row.category_id})
+match (pm:ProductModel {id: row.product_model_id})
+merge (c)-[:CATEGORIZE]->(pm);

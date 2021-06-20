@@ -14,16 +14,50 @@
     const session = driver.session({database:"neo4j"});
     const start = new Date()
     session
-      .run('MATCH (n)-[r:HAS_VALUE]->(m) RETURN { id: id(n), label:head(labels(n)), community:n.louvain, caption:n.id, size:n.pagerank } as source, { id: id(m), label:head(labels(m)), community:n.louvain, caption:m.value, size:m.pagerank } as target, {weight:r.weight, type:type(r), community:case when n.community < m.community then n.community else m.community end} as rel LIMIT $limit', {limit: neo4j.int(50000)})
+      .run(`
+        MATCH (n)-[r:HAS_VALUE]->(m)
+        RETURN {
+            id: id(n),
+            label: head(labels(n)),
+            community: n.family_id,
+            caption: n.id,
+            size: count(r)^1.4
+        } as source,
+        {
+            id: id(m),
+            label: head(labels(m)),
+            community: "value",
+            caption: m.value,
+            size: count(m)^1.1
+        } as target,
+        {
+            weight: count(r),
+            type: type(r),
+            community: case when n.community < m.community then n.community else m.community end
+        } as rel LIMIT $limit
+     `, {
+        limit: neo4j.int(5000)
+      })
       .then(function (result) {
         const nodes = {}
         const links = result.records.map(r => {
-           var source = r.get('source');source.id = source.id.toNumber();
-           nodes[source.id] = source;
-           var target = r.get('target');target.id = target.id.toNumber();
-           nodes[target.id] = target;
-           var rel = r.get('rel'); if (rel.weight) { rel.weight = rel.weight.toNumber(); }
-           return Object.assign({source:source.id,target:target.id}, rel);
+          var source = r.get('source');
+          source.id = source.id.toNumber();
+          nodes[source.id] = source;
+
+          var target = r.get('target');
+          target.id = target.id.toNumber();
+          nodes[target.id] = target;
+
+          var rel = r.get('rel');
+          if (rel.weight) {
+            rel.weight = rel.weight.toNumber();
+          }
+
+          return Object.assign({
+            source: source.id,
+            target: target.id
+          }, rel);
         });
         session.close();
         console.log(links.length+" links loaded in "+(new Date()-start)+" ms.")
@@ -33,7 +67,7 @@
                       .nodeAutoColorBy('community')
                       .nodeVal('size')
                       .linkAutoColorBy('community')
-                      .linkWidth(0)
+                      .linkWidth(3)
                       .linkDirectionalParticles('weight')
                       .linkDirectionalParticleSpeed('weight')
                       .nodeLabel(node => `${node.label}: ${node.caption}`)
