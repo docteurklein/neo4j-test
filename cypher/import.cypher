@@ -115,8 +115,8 @@ with pm, row
 optional match (fv:FamilyVariant {id: row.family_variant_id})
 merge (pm)-[:IS_FAMILY_VARIANT]->(fv)
 with pm, row
-optional match (pp:ProductModel {id: row.parent_id})
-merge (pm)-[:VARIATION_OF]->(pp)
+optional match (ppm:ProductModel {id: row.parent_id})
+merge (pm)-[:VARIATION_OF]->(ppm)
 
 with pm, apoc.convert.fromJsonMap(row.raw_values) as raw_values
 unwind keys(raw_values) as code
@@ -147,10 +147,10 @@ with pm, a, raw_values[a.code] as by_channel
         call apoc.create.addLabels(pv, [a.type]) yield node
         merge (pv)-[:FOR_ATTRIBUTE]->(a)
         with pv, channel, locale
-        match (c:Channel {code: channel})
+        optional match (c:Channel {code: channel})
         merge (pv)-[:LOCALIZED]->(c)
         with pv, locale
-        match (l:Locale {code: locale})
+        optional match (l:Locale {code: locale})
         merge (pv)-[:CHANNELED]->(l);
 
 call apoc.load.jdbc('jdbc:mysql://mysql:3306/akeneo_pim?user=root&password=root', 'pim_catalog_product') yield row
