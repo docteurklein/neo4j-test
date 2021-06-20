@@ -13,10 +13,11 @@ services:
       NEO4J_cypher_lenient__create__relationship: 'true'
       NEO4J_apoc_import_file_use__neo4j__config: 'true'
       #NEO4J_dbms_unmanaged__extension__classes: 'org.neo4j.graphql=/graphql'
-      NEO4JLABS_PLUGINS: '["apoc"]'
+      NEO4JLABS_PLUGINS: '["apoc", "graph-data-science"]'
     volumes:
       - ./plugins:/plugins
       - $PWD:$PWD
+      - neo4j:/var/lib/neo4j
 
   mysql:
     restart: always
@@ -38,3 +39,4 @@ services:
 
 volumes:
   mysql: ~
+  neo4j: ~

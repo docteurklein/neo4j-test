@@ -1,10 +1,12 @@
 match (n) detach delete n;
 
-drop index text_value if exists;
 drop index structure if exists;
+drop index text_value if exists;
 
 call apoc.schema.assert({
+  // index
 }, {
+  // unique
   Locale: ["id", "code"],
   Channel: ["id", "code"],
   Category: ["id", "code"],
@@ -16,8 +18,23 @@ call apoc.schema.assert({
   Product: ["id", "identifier"]
 });
 
-create fulltext index text_value for (v:pim_catalog_text|pim_catalog_textarea|pim_catalog_identifier|pim_catalog_simpleselect|pim_catalog_image|pim_catalog_file|pim_catalog_date) on each [v.value];
-create fulltext index structure for ()-[r:TRANSLATED_IN]->() on each [r.translation];
+CALL db.index.fulltext.createRelationshipIndex("structure", ["TRANSLATED_IN"], ["translation"], {
+    analyzer: "standard-no-stop-words",
+    eventually_consistent: "true"
+});
+
+CALL db.index.fulltext.createNodeIndex("text_value", [
+    "pim_catalog_text",
+    "pim_catalog_textarea",
+    "pim_catalog_identifier",
+    "pim_catalog_simpleselect",
+    "pim_catalog_image",
+    "pim_catalog_file",
+    "pim_catalog_date"
+], ["value"], {
+    analyzer: "standard-no-stop-words",
+    eventually_consistent: "true"
+});
 
 call apoc.load.jdbc('jdbc:mysql://mysql:3306/akeneo_pim?user=root&password=root', 'pim_catalog_locale') yield row
 merge (l:Locale {id: row.id}) set l.code = row.code;
@@ -33,7 +50,7 @@ merge (c)-[:TRANSLATED_IN {translation: row.label}]->(l);
 call apoc.load.jdbc('jdbc:mysql://mysql:3306/akeneo_pim?user=root&password=root', 'pim_catalog_category') yield row
 merge (c:Category {id: row.id}) set c.code = row.code
 with c, row
-match (p:Category {id: row.parent_id})
+optional match (p:Category {id: row.parent_id})
 merge (p)-[:HAS_SUBCATEGORY]->(c);
 
 call apoc.load.jdbc('jdbc:mysql://mysql:3306/akeneo_pim?user=root&password=root', 'pim_catalog_category_translation') yield row
@@ -52,7 +69,7 @@ merge (g)-[:TRANSLATED_IN {translation: row.label}]->(l);
 call apoc.load.jdbc('jdbc:mysql://mysql:3306/akeneo_pim?user=root&password=root', 'pim_catalog_attribute') yield row
 merge (a:Attribute {id: row.id}) set a.code = row.code, a.type = row.attribute_type
 with a, row
-match (g:AttributeGroup {id: row.group_id})
+optional match (g:AttributeGroup {id: row.group_id})
 merge (a)-[:IN_GROUP]->(g);
 
 call apoc.load.jdbc('jdbc:mysql://mysql:3306/akeneo_pim?user=root&password=root', 'pim_catalog_attribute_translation') yield row
@@ -61,8 +78,9 @@ match (a:Attribute {id: row.foreign_key})
 merge (a)-[:TRANSLATED_IN {translation: row.label}]->(l);
 
 call apoc.load.jdbc('jdbc:mysql://mysql:3306/akeneo_pim?user=root&password=root', 'pim_catalog_family') yield row
-match (a:Attribute {id: row.label_attribute_id})
 merge (f:Family {id: row.id}) set f.code = row.code
+with f, row
+optional match (a:Attribute {id: row.label_attribute_id})
 merge (a)-[:AS_LABEL]->(f);
 
 call apoc.load.jdbc('jdbc:mysql://mysql:3306/akeneo_pim?user=root&password=root', 'pim_catalog_family_translation') yield row
@@ -78,7 +96,7 @@ merge (f)-[:HAS_ATTRIBUTE]->(a);
 call apoc.load.jdbc('jdbc:mysql://mysql:3306/akeneo_pim?user=root&password=root', 'pim_catalog_family_variant') yield row
 merge (fv:FamilyVariant {id: row.id}) set fv.code = row.code
 with fv, row
-match (f:Family {id: row.family_id})
+optional match (f:Family {id: row.family_id})
 merge (f)-[:HAS_VARIANT]->(fv);
 
 call apoc.load.jdbc('jdbc:mysql://mysql:3306/akeneo_pim?user=root&password=root', 'pim_catalog_family_variant_translation') yield row
@@ -94,10 +112,10 @@ merge (f)-[:HAS_ATTRIBUTE]->(a);
 call apoc.load.jdbc('jdbc:mysql://mysql:3306/akeneo_pim?user=root&password=root', 'pim_catalog_product_model') yield row
 merge (pm:ProductModel {id: row.id}) set pm.code = row.code, pm.identifier = row.identifier, pm.is_enabled = row.is_enabled
 with pm, row
-match (fv:FamilyVariant {id: row.family_variant_id})
+optional match (fv:FamilyVariant {id: row.family_variant_id})
 merge (pm)-[:IS_FAMILY_VARIANT]->(fv)
 with pm, row
-match (pp:ProductModel {id: row.parent_id})
+optional match (pp:ProductModel {id: row.parent_id})
 merge (pm)-[:VARIATION_OF]->(pp)
 
 with pm, apoc.convert.fromJsonMap(row.raw_values) as raw_values
@@ -107,7 +125,7 @@ with pm, a, raw_values[a.code] as by_channel
     unwind keys(by_channel) as channel
     with pm, a, channel, by_channel[channel] as by_locale
         unwind keys(by_locale) as locale
-        merge (v:Value {
+        merge (pv:Value {
             value: case a.type
                 when 'pim_catalog_text' then by_locale[locale]
                 when 'pim_catalog_textarea' then by_locale[locale]
@@ -124,16 +142,16 @@ with pm, a, raw_values[a.code] as by_channel
                 else apoc.convert.toJson(by_locale[locale])
             end
         })
-        merge (pm)-[:HAS_VALUE {channel: channel, locale: locale}]->(v)
-        with pm, v, a, channel, locale
-        call apoc.create.addLabels(v, [a.type]) yield node
-        merge (v)-[:FOR_ATTRIBUTE]->(a)
-        with v, channel, locale
+        merge (pm)-[:HAS_VALUE {channel: channel, locale: locale}]->(pv)
+        with pm, pv, a, channel, locale
+        call apoc.create.addLabels(pv, [a.type]) yield node
+        merge (pv)-[:FOR_ATTRIBUTE]->(a)
+        with pv, channel, locale
         match (c:Channel {code: channel})
-        merge (v)-[:LOCALIZED]->(c)
-        with v, locale
+        merge (pv)-[:LOCALIZED]->(c)
+        with pv, locale
         match (l:Locale {code: locale})
-        merge (v)-[:CHANNELED]->(l);
+        merge (pv)-[:CHANNELED]->(l);
 
 call apoc.load.jdbc('jdbc:mysql://mysql:3306/akeneo_pim?user=root&password=root', 'pim_catalog_product') yield row
 merge (p:Product {id: row.id}) set p.is_enabled = row.is_enabled, p.identifier = row.identifier
@@ -151,7 +169,7 @@ with p, a, raw_values[a.code] as by_channel
     unwind keys(by_channel) as channel
     with p, a, channel, by_channel[channel] as by_locale
         unwind keys(by_locale) as locale
-        merge (v:Value {
+        merge (pv:Value {
             value: case a.type
                 when 'pim_catalog_text' then by_locale[locale]
                 when 'pim_catalog_textarea' then by_locale[locale]
@@ -168,16 +186,22 @@ with p, a, raw_values[a.code] as by_channel
                 else apoc.convert.toJson(by_locale[locale])
             end
         })
-        merge (p)-[:HAS_VALUE {channel: channel, locale: locale}]->(v)
-        with v, a, channel, locale
-        call apoc.create.addLabels(v, [a.type]) yield node
-        merge (v)-[:FOR_ATTRIBUTE]->(a)
-        with v, channel, locale
+        merge (p)-[:HAS_VALUE {channel: channel, locale: locale}]->(pv)
+        with pv, a, channel, locale
+        call apoc.create.addLabels(pv, [a.type]) yield node
+        merge (pv)-[:FOR_ATTRIBUTE]->(a)
+        with pv, channel, locale
         optional match (c:Channel {code: channel})
-        merge (v)-[:CHANNELED]->(c)
-        with v, locale
+        merge (pv)-[:CHANNELED]->(c)
+        with pv, locale
         optional match (l:Locale {code: locale})
-        merge (v)-[:LOCALIZED]->(l);
+        merge (pv)-[:LOCALIZED]->(l);
+
+match (pmv:Value)<-[r:HAS_VALUE]-(pm:ProductModel)<-[:VARIATION_OF]-(p:Product)
+merge (p)-[:HAS_VALUE {channel: r.channel, locale: r.locale, via: pm.code}]->(pmv);
+
+match (ppmv:Value)<-[r:HAS_VALUE]-(ppm:ProductModel)<-[:VARIATION_OF]-(pm:ProductModel)<-[:VARIATION_OF]-(p:Product)
+merge (p)-[:HAS_VALUE {channel: r.channel, locale: r.locale, via: ppm.code}]->(ppmv);
 
 call apoc.load.jdbc('jdbc:mysql://mysql:3306/akeneo_pim?user=root&password=root', 'pim_catalog_category_product') yield row
 match (c:Category {id: row.category_id})
